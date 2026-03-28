@@ -2,7 +2,6 @@ const systemInfo = tt.getSystemInfoSync();
 const canvas = tt.createCanvas();
 const ctx = canvas.getContext('2d');
 
-// 创建音频实例
 const bgMusic = tt.createInnerAudioContext();
 bgMusic.src = './libs/bgm.mp3';
 bgMusic.loop = true;
@@ -23,7 +22,6 @@ tt.onHide(() => {
   bgMusic.pause();
 });
 
-// 星星系统
 const stars = Array(50).fill().map(() => ({
     x: Math.random() * canvas.width,
     y: Math.random() * canvas.height,
@@ -31,7 +29,6 @@ const stars = Array(50).fill().map(() => ({
     brightness: Math.random()
 }));
 
-// 更新星星动画
 function updateStars() {
     stars.forEach(star => {
         star.brightness = Math.abs(Math.sin(Date.now() * 0.001 + Math.random()));
@@ -39,431 +36,662 @@ function updateStars() {
     requestAnimationFrame(updateStars);
 }
 
-// 设置画布尺寸
 canvas.width = systemInfo.windowWidth;
 canvas.height = systemInfo.windowHeight;
 
-// 游戏配置
-const GRID_SIZE = 20;
-const COLLISION_THRESHOLD = GRID_SIZE / 2;
-const BOARD_WIDTH = Math.floor(systemInfo.windowWidth * 0.9 / GRID_SIZE) * GRID_SIZE;
-const BOARD_HEIGHT = Math.floor(systemInfo.windowHeight * 0.7 / GRID_SIZE) * GRID_SIZE;
-const BOARD_X = (systemInfo.windowWidth - BOARD_WIDTH) / 2;
-const BOARD_Y = (systemInfo.windowHeight - BOARD_HEIGHT) / 3;
+const BLOCK_SIZE = 25;
+const BOARD_COLS = 10;
+const BOARD_ROWS = 20;
+const BOARD_WIDTH = BOARD_COLS * BLOCK_SIZE;
+const BOARD_HEIGHT = BOARD_ROWS * BLOCK_SIZE;
+const BOARD_X = (systemInfo.windowWidth - BOARD_WIDTH - 120) / 2;
+const BOARD_Y = (systemInfo.windowHeight - BOARD_HEIGHT) / 2;
 
-// 游戏状态
-let snake = [{
-    x: BOARD_X + 5 * GRID_SIZE,
-    y: BOARD_Y + 5 * GRID_SIZE
-}];
-let direction = 'right';
-let food = null;
-let score = 0;
-let gameOver = false;
-let gameLoop = null;
-let gamePaused = false;
-
-// 方向控制按钮
-const controlSize = 50;
-const controls = {
-    up: {
-        x: systemInfo.windowWidth / 2 - 25, 
-        y: systemInfo.windowHeight - 170,
-        w: controlSize,
-        h: controlSize
+const TETROMINOES = {
+    I: {
+        shape: [[1, 1, 1, 1]],
+        color: '#00F0FF',
+        glow: '#00FFFF'
     },
-    down: {
-        x: systemInfo.windowWidth / 2 - 25,
-        y: systemInfo.windowHeight - 70,
-        w: controlSize,
-        h: controlSize
+    O: {
+        shape: [
+            [1, 1],
+            [1, 1]
+        ],
+        color: '#FFD700',
+        glow: '#FFFF00'
     },
-    left: {
-        x: (systemInfo.windowWidth / 2) - 75,  
-        y: systemInfo.windowHeight - 120,
-        w: controlSize,
-        h: controlSize
+    T: {
+        shape: [
+            [0, 1, 0],
+            [1, 1, 1]
+        ],
+        color: '#A855F7',
+        glow: '#C084FC'
     },
-    right: {
-        x: (systemInfo.windowWidth / 2) + 25, 
-        y: systemInfo.windowHeight - 120,
-        w: controlSize,
-        h: controlSize
+    L: {
+        shape: [
+            [1, 0],
+            [1, 0],
+            [1, 1]
+        ],
+        color: '#FF8C00',
+        glow: '#FFA500'
+    },
+    J: {
+        shape: [
+            [0, 1],
+            [0, 1],
+            [1, 1]
+        ],
+        color: '#4169E1',
+        glow: '#6495ED'
+    },
+    S: {
+        shape: [
+            [0, 1, 1],
+            [1, 1, 0]
+        ],
+        color: '#32CD32',
+        glow: '#00FF00'
+    },
+    Z: {
+        shape: [
+            [1, 1, 0],
+            [0, 1, 1]
+        ],
+        color: '#FF4757',
+        glow: '#FF6B7A'
     }
 };
 
-// 重新开始按钮
-const restartButton = {
-    x: 200,
-    y: systemInfo.windowHeight - 90,
-    w: 100,
-    h: 40
-};
-
-// 绘制暂停按钮
-const pauseButton = {
-    x: 105,
-    y: 75,
-    w: 20,
-    h: 20,
-};
-
-// 生成随机食物
-function generateFood() {
-    // 添加边距，避免食物生成在边缘
-    const margin = GRID_SIZE;
-    const minX = BOARD_X + margin;
-    const maxX = BOARD_X + BOARD_WIDTH - margin - GRID_SIZE;
-    const minY = BOARD_Y + margin;
-    const maxY = BOARD_Y + BOARD_HEIGHT - margin - GRID_SIZE;
-
-    const x = Math.floor(Math.random() * ((maxX - minX) / GRID_SIZE + 1)) * GRID_SIZE + minX;
-    const y = Math.floor(Math.random() * ((maxY - minY) / GRID_SIZE + 1)) * GRID_SIZE + minY;
-    
-    food = { x, y };
-}
-// 检查碰撞
-function checkCollision(head) {
-    // 检查墙壁碰撞
-    if (head.x < BOARD_X || head.x >= BOARD_X + BOARD_WIDTH ||
-        head.y < BOARD_Y || head.y >= BOARD_Y + BOARD_HEIGHT) {
-        return true;
+class Tetromino {
+    constructor(type) {
+        this.type = type;
+        this.shape = TETROMINOES[type].shape.map(row => [...row]);
+        this.color = TETROMINOES[type].color;
+        this.glow = TETROMINOES[type].glow;
+        this.x = Math.floor(BOARD_COLS / 2) - Math.floor(this.shape[0].length / 2);
+        this.y = 0;
     }
-    // 检查自身碰撞
-    for (let i = 0; i < snake.length; i++) {
-        if (head.x === snake[i].x && head.y === snake[i].y) {
-            return true;
+
+    move(dx, dy) {
+        this.x += dx;
+        this.y += dy;
+    }
+
+    rotate() {
+        const rows = this.shape.length;
+        const cols = this.shape[0].length;
+        const rotated = [];
+        
+        for (let i = 0; i < cols; i++) {
+            rotated[i] = [];
+            for (let j = 0; j < rows; j++) {
+                rotated[i][j] = this.shape[rows - 1 - j][i];
+            }
         }
-    }
-    return false;
-}
-
-// 检查是否碰到食物
-function checkFoodCollision(head, food) {
-    const distance = Math.sqrt(
-        Math.pow(head.x - food.x, 2) +
-        Math.pow(head.y - food.y, 2)
-    );
-    return distance < COLLISION_THRESHOLD;
-}
-
-// 游戏更新
-function update() {
-    if (gameOver || gamePaused) return;
-
-    const head = {
-        ...snake[0]
-    };
-    switch (direction) {
-        case 'up':
-            head.y -= GRID_SIZE;
-            break;
-        case 'down':
-            head.y += GRID_SIZE;
-            break;
-        case 'left':
-            head.x -= GRID_SIZE;
-            break;
-        case 'right':
-            head.x += GRID_SIZE;
-            break;
+        
+        this.shape = rotated;
     }
 
-    // 先检查是否吃到食物
-    if (food && checkFoodCollision(head, food)) {
-        score++;
-        snake.unshift(head);
-        generateFood();
-        eatSound.play();  // 添加这一行
-        return;
-    }
-
-    // 检查是否撞墙
-    if (head.x < BOARD_X || head.x >= BOARD_X + BOARD_WIDTH ||
-        head.y < BOARD_Y || head.y >= BOARD_Y + BOARD_HEIGHT) {
-        gameOver = true;
-        bgMusic.pause(); // 游戏结束时暂停背景音乐
-        tt.showModal({
-            title: '游戏结束',
-            content: `得分：${score}\n要分享你的成绩吗？`,
-            showCancel: true,
-            cancelText: '重新开始',
-            confirmText: '分享',
-            success: (res) => {
-                if (res.confirm) {
-                    tt.shareAppMessage({
-                        title: `我在贪吃蛇游戏中获得了${score}分，快来挑战我吧！`,
-                        query: `from=share&score=${score}`, // 更新分数参数
-                        success(res) {
-                            console.log("分享成功", res);
-                            resetGame();
-                        },
-                        fail(e) {
-                            console.log("分享失败", e);
-                            resetGame();
-                        }
-                    });
-                } else {
-                    resetGame();
+    checkCollision(board) {
+        for (let row = 0; row < this.shape.length; row++) {
+            for (let col = 0; col < this.shape[row].length; col++) {
+                if (this.shape[row][col]) {
+                    const newX = this.x + col;
+                    const newY = this.y + row;
+                    
+                    if (newX < 0 || newX >= BOARD_COLS || newY >= BOARD_ROWS) {
+                        return true;
+                    }
+                    
+                    if (newY >= 0 && board[newY][newX]) {
+                        return true;
+                    }
                 }
             }
-        });
-        return;
+        }
+        return false;
+    }
+}
+
+class GameBoard {
+    constructor() {
+        this.board = Array(BOARD_ROWS).fill(null).map(() => Array(BOARD_COLS).fill(null));
+        this.boardColors = Array(BOARD_ROWS).fill(null).map(() => Array(BOARD_COLS).fill(null));
+        this.boardGlows = Array(BOARD_ROWS).fill(null).map(() => Array(BOARD_COLS).fill(null));
+        this.score = 0;
+        this.level = 1;
+        this.lines = 0;
+        this.gameOver = false;
+        this.gamePaused = false;
     }
 
-    // 检查是否撞到自己
-    for (let i = 0; i < snake.length; i++) {
-        if (head.x === snake[i].x && head.y === snake[i].y) {
-            gameOver = true;
-            bgMusic.pause(); // 游戏结束时暂停背景音乐
-            tt.showModal({
-                title: '游戏结束',
-                content: `得分：${score}`,
-                showCancel: false,
-                success: () => {
-                    resetGame();
+    placePiece(piece) {
+        for (let row = 0; row < piece.shape.length; row++) {
+            for (let col = 0; col < piece.shape[row].length; col++) {
+                if (piece.shape[row][col]) {
+                    const boardY = piece.y + row;
+                    const boardX = piece.x + col;
+                    if (boardY >= 0 && boardY < BOARD_ROWS && boardX >= 0 && boardX < BOARD_COLS) {
+                        this.board[boardY][boardX] = piece.color;
+                        this.boardColors[boardY][boardX] = piece.color;
+                        this.boardGlows[boardY][boardX] = piece.glow;
+                    }
                 }
-            });
-            return;
+            }
         }
     }
 
-    // 移动蛇
-    snake.unshift(head);
-    snake.pop();
+    checkLines() {
+        let linesCleared = 0;
+        
+        for (let row = BOARD_ROWS - 1; row >= 0; row--) {
+            if (this.board[row].every(cell => cell !== null)) {
+                this.board.splice(row, 1);
+                this.boardColors.splice(row, 1);
+                this.boardGlows.splice(row, 1);
+                this.board.unshift(Array(BOARD_COLS).fill(null));
+                this.boardColors.unshift(Array(BOARD_COLS).fill(null));
+                this.boardGlows.unshift(Array(BOARD_COLS).fill(null));
+                linesCleared++;
+                row++;
+            }
+        }
+        
+        if (linesCleared > 0) {
+            this.lines += linesCleared;
+            this.score += linesCleared * 100 * this.level;
+            this.level = Math.floor(this.lines / 10) + 1;
+            updateDropInterval();
+        }
+        
+        return linesCleared;
+    }
+
+    reset() {
+        this.board = Array(BOARD_ROWS).fill(null).map(() => Array(BOARD_COLS).fill(null));
+        this.boardColors = Array(BOARD_ROWS).fill(null).map(() => Array(BOARD_COLS).fill(null));
+        this.boardGlows = Array(BOARD_ROWS).fill(null).map(() => Array(BOARD_COLS).fill(null));
+        this.score = 0;
+        this.level = 1;
+        this.lines = 0;
+        this.gameOver = false;
+        this.gamePaused = false;
+    }
 }
 
-// 绘制游戏
-function draw() {
-    // 太空背景
-    ctx.fillStyle = '#0B0B2A';
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+let board = new GameBoard();
+let currentPiece = null;
+let nextPiece = null;
+let gameLoop = null;
+let dropInterval = 1000;
 
-    // 游戏边界 - 太空站风格
+const placeSound = tt.createInnerAudioContext();
+placeSound.src = './libs/eat.mp3';
+
+function getRandomPiece() {
+    const types = Object.keys(TETROMINOES);
+    const randomType = types[Math.floor(Math.random() * types.length)];
+    return new Tetromino(randomType);
+}
+
+function spawnPiece() {
+    if (nextPiece === null) {
+        nextPiece = getRandomPiece();
+    }
+    
+    currentPiece = nextPiece;
+    nextPiece = getRandomPiece();
+    
+    if (currentPiece.checkCollision(board.board)) {
+        board.gameOver = true;
+        bgMusic.pause();
+        tt.showModal({
+            title: '游戏结束',
+            content: `得分：${board.score}\n消除行数：${board.lines}`,
+            showCancel: false,
+            success: () => {
+                resetGame();
+            }
+        });
+    }
+}
+
+function movePieceLeft() {
+    currentPiece.move(-1, 0);
+    if (currentPiece.checkCollision(board.board)) {
+        currentPiece.move(1, 0);
+    }
+}
+
+function movePieceRight() {
+    currentPiece.move(1, 0);
+    if (currentPiece.checkCollision(board.board)) {
+        currentPiece.move(-1, 0);
+    }
+}
+
+function softDrop() {
+    currentPiece.move(0, 1);
+    if (currentPiece.checkCollision(board.board)) {
+        currentPiece.move(0, -1);
+        return false;
+    }
+    return true;
+}
+
+function rotatePiece() {
+    const originalShape = currentPiece.shape.map(row => [...row]);
+    const originalX = currentPiece.x;
+    const originalY = currentPiece.y;
+    
+    currentPiece.rotate();
+    
+    if (currentPiece.checkCollision(board.board)) {
+        let adjusted = false;
+        
+        for (let i = 1; i < 4; i++) {
+            currentPiece.x += 1;
+            if (!currentPiece.checkCollision(board.board)) {
+                adjusted = true;
+                break;
+            }
+        }
+        
+        if (!adjusted) {
+            currentPiece.x = originalX;
+            for (let i = 1; i < 4; i++) {
+                currentPiece.x -= 1;
+                if (!currentPiece.checkCollision(board.board)) {
+                    adjusted = true;
+                    break;
+                }
+            }
+        }
+        
+        if (!adjusted) {
+            currentPiece.shape = originalShape;
+            currentPiece.x = originalX;
+            currentPiece.y = originalY;
+        }
+    }
+}
+
+function hardDrop() {
+    while (softDrop()) {
+        board.score += 2;
+    }
+}
+
+function update() {
+    if (board.gameOver || board.gamePaused) return;
+    
+    if (!softDrop()) {
+        board.placePiece(currentPiece);
+        const linesCleared = board.checkLines();
+        if (linesCleared > 0) {
+            placeSound.play();
+        }
+        spawnPiece();
+    }
+}
+
+function drawBlock(x, y, color, glowColor) {
+    const screenX = BOARD_X + x * BLOCK_SIZE;
+    const screenY = BOARD_Y + y * BLOCK_SIZE;
+    
+    ctx.shadowColor = glowColor;
+    ctx.shadowBlur = 10;
+    
+    const gradient = ctx.createLinearGradient(screenX, screenY, screenX + BLOCK_SIZE, screenY + BLOCK_SIZE);
+    gradient.addColorStop(0, color);
+    gradient.addColorStop(1, adjustColor(color, -30));
+    
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.roundRect(screenX + 1, screenY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2, 2);
+    ctx.fill();
+    
+    ctx.shadowBlur = 0;
+    ctx.strokeStyle = adjustColor(color, 50);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.roundRect(screenX + 1, screenY + 1, BLOCK_SIZE - 2, BLOCK_SIZE - 2, 2);
+    ctx.stroke();
+    
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+    ctx.beginPath();
+    ctx.roundRect(screenX + 2, screenY + 2, BLOCK_SIZE - 4, (BLOCK_SIZE - 4) / 2, 1);
+    ctx.fill();
+}
+
+function adjustColor(color, amount) {
+    const hex = color.replace('#', '');
+    const r = Math.max(0, Math.min(255, parseInt(hex.substr(0, 2), 16) + amount));
+    const g = Math.max(0, Math.min(255, parseInt(hex.substr(2, 2), 16) + amount));
+    const b = Math.max(0, Math.min(255, parseInt(hex.substr(4, 2), 16) + amount));
+    return `rgb(${r}, ${g}, ${b})`;
+}
+
+function drawBoard() {
     ctx.fillStyle = '#1A1A3A';
     ctx.fillRect(BOARD_X, BOARD_Y, BOARD_WIDTH, BOARD_HEIGHT);
     
-    // 绘制星星
+    ctx.shadowColor = '#7AFFAF';
+    ctx.shadowBlur = 10;
+    ctx.strokeStyle = '#7AFFAF';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(BOARD_X, BOARD_Y, BOARD_WIDTH, BOARD_HEIGHT);
+    ctx.shadowBlur = 0;
+    
+    ctx.strokeStyle = 'rgba(122, 255, 175, 0.1)';
+    ctx.lineWidth = 1;
+    for (let i = 0; i <= BOARD_COLS; i++) {
+        ctx.beginPath();
+        ctx.moveTo(BOARD_X + i * BLOCK_SIZE, BOARD_Y);
+        ctx.lineTo(BOARD_X + i * BLOCK_SIZE, BOARD_Y + BOARD_HEIGHT);
+        ctx.stroke();
+    }
+    for (let i = 0; i <= BOARD_ROWS; i++) {
+        ctx.beginPath();
+        ctx.moveTo(BOARD_X, BOARD_Y + i * BLOCK_SIZE);
+        ctx.lineTo(BOARD_X + BOARD_WIDTH, BOARD_Y + i * BLOCK_SIZE);
+        ctx.stroke();
+    }
+    
+    for (let row = 0; row < BOARD_ROWS; row++) {
+        for (let col = 0; col < BOARD_COLS; col++) {
+            if (board.board[row][col]) {
+                drawBlock(col, row, board.boardColors[row][col], board.boardGlows[row][col]);
+            }
+        }
+    }
+}
+
+function drawPiece(piece, offsetX = 0, offsetY = 0) {
+    if (!piece) return;
+    
+    for (let row = 0; row < piece.shape.length; row++) {
+        for (let col = 0; col < piece.shape[row].length; col++) {
+            if (piece.shape[row][col]) {
+                drawBlock(piece.x + col + offsetX, piece.y + row + offsetY, piece.color, piece.glow);
+            }
+        }
+    }
+}
+
+function drawPreview() {
+    const previewX = BOARD_X + BOARD_WIDTH + 20;
+    const previewY = BOARD_Y;
+    const previewSize = 100;
+    const previewBlockSize = 20;
+    
+    ctx.fillStyle = '#1A1A3A';
+    ctx.fillRect(previewX, previewY, previewSize, previewSize);
+    
+    ctx.shadowColor = '#00D4FF';
+    ctx.shadowBlur = 10;
+    ctx.strokeStyle = '#00D4FF';
+    ctx.lineWidth = 2;
+    ctx.strokeRect(previewX, previewY, previewSize, previewSize);
+    ctx.shadowBlur = 0;
+    
+    ctx.fillStyle = '#7AFFAF';
+    ctx.font = '16px Arial';
+    ctx.textAlign = 'center';
+    ctx.fillText('下一个', previewX + previewSize / 2, previewY - 10);
+    ctx.textAlign = 'left';
+    
+    if (nextPiece) {
+        const pieceWidth = nextPiece.shape[0].length * previewBlockSize;
+        const pieceHeight = nextPiece.shape.length * previewBlockSize;
+        const offsetX = Math.floor((previewSize - pieceWidth) / 2);
+        const offsetY = Math.floor((previewSize - pieceHeight) / 2);
+        
+        for (let row = 0; row < nextPiece.shape.length; row++) {
+            for (let col = 0; col < nextPiece.shape[row].length; col++) {
+                if (nextPiece.shape[row][col]) {
+                    const x = previewX + offsetX + col * previewBlockSize;
+                    const y = previewY + offsetY + row * previewBlockSize;
+                    
+                    ctx.shadowColor = nextPiece.glow;
+                    ctx.shadowBlur = 10;
+                    
+                    const gradient = ctx.createLinearGradient(x, y, x + previewBlockSize, y + previewBlockSize);
+                    gradient.addColorStop(0, nextPiece.color);
+                    gradient.addColorStop(1, adjustColor(nextPiece.color, -30));
+                    
+                    ctx.fillStyle = gradient;
+                    ctx.beginPath();
+                    ctx.roundRect(x + 1, y + 1, previewBlockSize - 2, previewBlockSize - 2, 2);
+                    ctx.fill();
+                    
+                    ctx.shadowBlur = 0;
+                    ctx.strokeStyle = adjustColor(nextPiece.color, 50);
+                    ctx.lineWidth = 2;
+                    ctx.beginPath();
+                    ctx.roundRect(x + 1, y + 1, previewBlockSize - 2, previewBlockSize - 2, 2);
+                    ctx.stroke();
+                    
+                    ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+                    ctx.beginPath();
+                    ctx.roundRect(x + 2, y + 2, previewBlockSize - 4, (previewBlockSize - 4) / 2, 1);
+                    ctx.fill();
+                }
+            }
+        }
+    }
+}
+
+function drawScore() {
+    const scoreX = 30;
+    const scoreY = 80;
+    
+    ctx.shadowColor = '#7AFFAF';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#7AFFAF';
+    ctx.font = '20px Arial';
+    ctx.textAlign = 'left';
+    ctx.fillText('得分', scoreX, scoreY);
+    
+    ctx.font = '24px Arial';
+    ctx.fillText(board.score.toString(), scoreX, scoreY + 30);
+    
+    const levelX = systemInfo.windowWidth - 30;
+    ctx.shadowColor = '#00D4FF';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#00D4FF';
+    ctx.font = '20px Arial';
+    ctx.textAlign = 'right';
+    ctx.fillText('等级', levelX, scoreY);
+    
+    ctx.font = '24px Arial';
+    ctx.fillText(board.level.toString(), levelX, scoreY + 30);
+    
+    ctx.shadowBlur = 0;
+    ctx.textAlign = 'left';
+}
+
+function drawPauseButton() {
+    const pauseButton = {
+        x: 30,
+        y: 75,
+        w: 20,
+        h: 20
+    };
+    
+    ctx.shadowColor = '#7AFFAF';
+    ctx.shadowBlur = 10;
+    ctx.fillStyle = '#7AFFAF';
+    ctx.font = '20px "Arial"';
+    ctx.fillText('⏸', pauseButton.x + 5, pauseButton.y + 5);
+    ctx.shadowBlur = 0;
+}
+
+function drawControls() {
+    const buttonSize = 60;
+    const buttonMargin = 10;
+    const bottomY = systemInfo.windowHeight - 100;
+    
+    const leftButton = { x: BOARD_X - buttonSize - buttonMargin, y: bottomY, w: buttonSize, h: buttonSize, text: '←' };
+    const rightButton = { x: BOARD_X + BOARD_WIDTH + buttonMargin, y: bottomY, w: buttonSize, h: buttonSize, text: '→' };
+    const rotateButton = { x: systemInfo.windowWidth / 2 - buttonSize / 2, y: bottomY, w: buttonSize, h: buttonSize, text: '↻' };
+    const dropButton = { x: systemInfo.windowWidth / 2 - buttonSize / 2, y: bottomY + buttonSize + buttonMargin, w: buttonSize, h: buttonSize, text: '↓' };
+    
+    const buttons = [leftButton, rightButton, rotateButton, dropButton];
+    
+    buttons.forEach(btn => {
+        const gradient = ctx.createLinearGradient(btn.x, btn.y, btn.x, btn.y + btn.h);
+        gradient.addColorStop(0, '#2A2A4A');
+        gradient.addColorStop(1, '#1A1A3A');
+        
+        ctx.fillStyle = gradient;
+        ctx.strokeStyle = 'rgba(122, 255, 175, 0.3)';
+        ctx.lineWidth = 1;
+        
+        ctx.beginPath();
+        ctx.roundRect(btn.x, btn.y, btn.w, btn.h, 10);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.fillStyle = '#7AFFAF';
+        ctx.font = '24px Arial';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText(btn.text, btn.x + btn.w / 2, btn.y + btn.h / 2);
+    });
+    
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'alphabetic';
+}
+
+function draw() {
+    ctx.fillStyle = '#0B0B2A';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    
     stars.forEach(star => {
         ctx.fillStyle = `rgba(255, 255, 255, ${star.brightness})`;
         ctx.fillRect(star.x, star.y, star.size, star.size);
     });
-
-    // 绘制蛇 - 太空舱风格
-    snake.forEach((segment, index) => {
-        // 发光效果
-        const gradient = ctx.createRadialGradient(
-            segment.x + GRID_SIZE/2, 
-            segment.y + GRID_SIZE/2, 
-            0,
-            segment.x + GRID_SIZE/2, 
-            segment.y + GRID_SIZE/2, 
-            GRID_SIZE
-        );
-        
-        if (index === 0) {
-            gradient.addColorStop(0, '#00FF00');
-            gradient.addColorStop(1, '#00FF00');
-        } else {
-            gradient.addColorStop(0, '#00CC00');
-            gradient.addColorStop(1, '#00CC00');
-        }
-        
-        ctx.fillStyle = gradient;
-        ctx.beginPath();
-        if (index === 0) {
-            ctx.moveTo(segment.x + GRID_SIZE/2, segment.y + GRID_SIZE/2);
-            let startAngle = 0;
-            let endAngle;
-            switch(direction) {
-                case 'up':
-                    startAngle = 1.75 * Math.PI;
-                    break;
-                case 'down':
-                    startAngle = 0.75 * Math.PI;
-                    break;
-                case 'left':
-                    startAngle = 1.25 * Math.PI;
-                    break;
-                case 'right':
-                    startAngle = 0.25 * Math.PI;
-                    break;
-            }
-            endAngle = startAngle + 1.5 * Math.PI
-            ctx.arc(segment.x + GRID_SIZE/2, segment.y + GRID_SIZE/2, GRID_SIZE/2, startAngle, endAngle, false);
-            ctx.closePath();
-        } else {
-            ctx.arc(segment.x + GRID_SIZE/2, segment.y + GRID_SIZE/2, GRID_SIZE/2, 0, 2 * Math.PI);
-        }
-        ctx.fill();
-    });
-
-    // 绘制食物 - 星星样式
-    if (food) {
-        ctx.fillStyle = '#FFD700';
-        const centerX = food.x + GRID_SIZE/2;
-        const centerY = food.y + GRID_SIZE/2;
-        const spikes = 5;
-        const outerRadius = GRID_SIZE/2;
-        const innerRadius = GRID_SIZE/4;
-        
-        ctx.beginPath();
-        for(let i = 0; i < spikes * 2; i++) {
-            const radius = i % 2 === 0 ? outerRadius : innerRadius;
-            const angle = (i * Math.PI) / spikes;
-            const x = centerX + Math.cos(angle) * radius;
-            const y = centerY + Math.sin(angle) * radius;
-            if(i === 0) ctx.moveTo(x, y);
-            else ctx.lineTo(x, y);
-        }
-        ctx.closePath();
-        ctx.fill();
-    }
-
-    // 绘制分数 - 发光文字
-    ctx.fillStyle = '#7AFFAF';
-    ctx.font = '20px "Arial"';
-    ctx.shadowColor = '#7AFFAF';
-    ctx.shadowBlur = 10;
-    ctx.fillText(`得分: ${score}`, 30, 80);
-
-    ctx.font = '20px "Arial"';
-    ctx.fillText(`⏸`, pauseButton.x + 5, pauseButton.y + 5);
-    ctx.shadowBlur = 0;
-
-    // 绘制控制按钮 - 太空舱风格
-    for (let key in controls) {
-        const btn = controls[key];
-        const gradient = ctx.createLinearGradient(btn.x, btn.y, btn.x, btn.y + btn.h);
-        gradient.addColorStop(0, '#2A2A4A');
-        gradient.addColorStop(1, '#1A1A3A');
-        ctx.fillStyle = gradient;
-        
-        // 圆角矩形实现
-        const radius = 10;
-        ctx.beginPath();
-        ctx.moveTo(btn.x + radius, btn.y);
-        ctx.lineTo(btn.x + btn.w - radius, btn.y);
-        ctx.arcTo(btn.x + btn.w, btn.y, btn.x + btn.w, btn.y + radius, radius);
-        ctx.lineTo(btn.x + btn.w, btn.y + btn.h - radius);
-        ctx.arcTo(btn.x + btn.w, btn.y + btn.h, btn.x + btn.w - radius, btn.y + btn.h, radius);
-        ctx.lineTo(btn.x + radius, btn.y + btn.h);
-        ctx.arcTo(btn.x, btn.y + btn.h, btn.x, btn.y + btn.h - radius, radius);
-        ctx.lineTo(btn.x, btn.y + radius);
-        ctx.arcTo(btn.x, btn.y, btn.x + radius, btn.y, radius);
-        ctx.fill();
-    }
-
-    // 绘制方向按钮文字
-    ctx.fillStyle = '#7AFFAF';
-    ctx.font = '20px Arial';
-    if (systemInfo.platform === 'devtools') {
-        ctx.fillText('↑', controls.up.x + 20, controls.up.y + 30);
-        ctx.fillText('↓', controls.down.x + 20, controls.down.y + 30);
-        ctx.fillText('←', controls.left.x + 15, controls.left.y + 30);
-        ctx.fillText('→', controls.right.x + 15, controls.right.y + 30);
-    } else {
-        ctx.fillText('↑', controls.up.x + 16.5, controls.up.y + 30);
-        ctx.fillText('↓', controls.down.x + 16.5, controls.down.y + 30);
-        ctx.fillText('←', controls.left.x + 15, controls.left.y + 30);
-        ctx.fillText('→', controls.right.x + 15, controls.right.y + 30);
-    }
+    
+    drawBoard();
+    drawPiece(currentPiece);
+    drawPreview();
+    drawScore();
+    drawPauseButton();
+    drawControls();
 }
 
-// 重置游戏
 function resetGame() {
-    snake = [{
-        x: BOARD_X + 5 * GRID_SIZE,
-        y: BOARD_Y + 5 * GRID_SIZE
-    }];
-    direction = 'right';
-    score = 0;
-    gameOver = false;
-    bgMusic.play(); // 重新开始游戏时恢复播放背景音乐
-    generateFood();
+    board.reset();
+    currentPiece = null;
+    nextPiece = null;
+    dropInterval = 1000;
+    spawnPiece();
+    bgMusic.play();
 }
 
-// 检查触摸控制
 function handleTouch(touch) {
     const x = touch.screenX;
     const y = touch.screenY;
-
-    // 检查暂停按钮点击
+    
+    const pauseButton = {
+        x: 30,
+        y: 75,
+        w: 20,
+        h: 20
+    };
+    
     if (x >= pauseButton.x && x <= pauseButton.x + pauseButton.w &&
         y >= pauseButton.y && y <= pauseButton.y + pauseButton.h) {
-        gamePaused = true;
+        board.gamePaused = true;
         tt.showModal({
             title: '游戏暂停',
-            content: `当前得分为：${score}`,
+            content: `当前得分：${board.score}`,
             showCancel: true,
             cancelText: '重新开始',
             confirmText: '继续',
             success: (res) => {
                 if (res.confirm) {
-                    gamePaused = false;
+                    board.gamePaused = false;
                     bgMusic.play();
                 } else {
-                    gamePaused = false;
+                    board.gamePaused = false;
                     resetGame();
                 }
             }
         });
         return;
     }
-
-    // 检查重新开始按钮点击
-    // if (x >= restartButton.x && x <= restartButton.x + restartButton.w &&
-    //     y >= restartButton.y && y <= restartButton.y + restartButton.h) {
-    //     resetGame();
-    //     return;
-    // }
-
-    for (let key in controls) {
-        const btn = controls[key];
-        if (x >= btn.x && x <= btn.x + btn.w &&
-            y >= btn.y && y <= btn.y + btn.h) {
-            if ((key === 'up' && direction !== 'down') ||
-                (key === 'down' && direction !== 'up') ||
-                (key === 'left' && direction !== 'right') ||
-                (key === 'right' && direction !== 'left')) {
-                direction = key;
-            }
-            break;
-        }
+    
+    const buttonSize = 60;
+    const buttonMargin = 10;
+    const bottomY = systemInfo.windowHeight - 100;
+    
+    const leftButton = { x: BOARD_X - buttonSize - buttonMargin, y: bottomY, w: buttonSize, h: buttonSize };
+    const rightButton = { x: BOARD_X + BOARD_WIDTH + buttonMargin, y: bottomY, w: buttonSize, h: buttonSize };
+    const rotateButton = { x: systemInfo.windowWidth / 2 - buttonSize / 2, y: bottomY, w: buttonSize, h: buttonSize };
+    const dropButton = { x: systemInfo.windowWidth / 2 - buttonSize / 2, y: bottomY + buttonSize + buttonMargin, w: buttonSize, h: buttonSize };
+    
+    if (x >= leftButton.x && x <= leftButton.x + leftButton.w &&
+        y >= leftButton.y && y <= leftButton.y + leftButton.h) {
+        movePieceLeft();
+    } else if (x >= rightButton.x && x <= rightButton.x + rightButton.w &&
+        y >= rightButton.y && y <= rightButton.y + rightButton.h) {
+        movePieceRight();
+    } else if (x >= rotateButton.x && x <= rotateButton.x + rotateButton.w &&
+        y >= rotateButton.y && y <= rotateButton.y + rotateButton.h) {
+        rotatePiece();
+    } else if (x >= dropButton.x && x <= dropButton.x + dropButton.w &&
+        y >= dropButton.y && y <= dropButton.y + dropButton.h) {
+        hardDrop();
     }
 }
 
-// 支持PC键盘事件
 function handleKeyDown(key) {
-    if ((key === 'ArrowUp' && direction !== 'down') ||
-        (key === 'ArrowDown' && direction !== 'up') ||
-        (key === 'ArrowLeft' && direction !== 'right') ||
-        (key === 'ArrowRight' && direction !== 'left')) {
-        direction = key.toLowerCase().slice(5,key.length)
+    if (board.gamePaused) return;
+    
+    switch (key) {
+        case 'ArrowLeft':
+            movePieceLeft();
+            break;
+        case 'ArrowRight':
+            movePieceRight();
+            break;
+        case 'ArrowUp':
+            rotatePiece();
+            break;
+        case 'ArrowDown':
+            softDrop();
+            break;
+        case ' ':
+            hardDrop();
+            break;
     }
 }
 
-// 游戏主循环
 function gameMainLoop() {
     update();
     draw();
-    gameLoop = setTimeout(gameMainLoop, 300);
+    gameLoop = setTimeout(gameMainLoop, dropInterval);
 }
 
-// 触摸事件监听
+function updateDropInterval() {
+    dropInterval = Math.max(100, 1000 - (board.level - 1) * 100);
+}
+
 tt.onTouchStart((event) => {
     handleTouch(event.touches[0]);
 });
 
 if (systemInfo.platform === 'devtools') {
     tt.onKeyDown(({ key }) => {
-        handleKeyDown(key)
-    })
+        handleKeyDown(key);
+    });
 }
 
-// 初始化游戏
-const eatSound = tt.createInnerAudioContext();
-eatSound.src = './libs/eat.mp3';
-updateStars(); // 启动星星动画
+updateStars();
 resetGame();
 gameMainLoop();
